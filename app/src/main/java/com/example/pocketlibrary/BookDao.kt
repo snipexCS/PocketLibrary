@@ -14,8 +14,9 @@ interface BookDao {
     @Delete
     suspend fun delete(book: Book)
 
-    @Query("SELECT * FROM books WHERE title LIKE '%' || :query || '%' OR author LIKE '%' || :query || '%'")
+    @Query("SELECT * FROM books WHERE UPPER(title) LIKE '%' || UPPER(:query) || '%' OR UPPER(author) LIKE '%' || UPPER(:query) || '%'")
     suspend fun search(query: String): List<Book>
+
 
     @Query("SELECT * FROM books")
     suspend fun getAllBooks(): List<Book>

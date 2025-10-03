@@ -1,52 +1,85 @@
 package com.example.pocketlibrary
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.ContactsContract
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.launch
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+
+
 
 @Composable
 fun LibraryApp(viewModel: AppViewModel) {
     var searchQuery by remember { mutableStateOf("") }
     var showLocal by remember { mutableStateOf(false) }
-    var showManualEntry by remember { mutableStateOf(false) } // State for manual entry dialog
+    var showManualEntry by remember { mutableStateOf(false) }
 
     val searchResults by viewModel.searchResults.collectAsState()
     val myLibrary by viewModel.myLibrary.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
 
-    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(6.dp)) {
 
-        // Top buttons
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Button(onClick = {
-                showLocal = false
-                viewModel.searchOnline(searchQuery)
-            }) { Text("Search Online") }
+        // --- Top buttons row ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround
+        ) {
+            Row { // LEFT SIDE
+                Button(onClick = {
+                    showLocal = false
+                    viewModel.searchOnline(searchQuery)
+                }) { Text("Search Online") }
 
-            Button(onClick = {
-                showLocal = true
-                viewModel.loadMyLibrary()
-            }) { Text("My Library") }
+                Spacer(modifier = Modifier.width(8.dp))
 
-            Button(onClick = { showManualEntry = true }) { Text("Add Book Manually") }
+                Button(onClick = {
+                    showLocal = true
+                    viewModel.loadMyLibrary()
+                }) { Text("My Library") }
+            }
+
+            Button(onClick = { showManualEntry = true }) { // RIGHT SIDE
+                Text("Add Book")
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Search input
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = { searchQuery = it },
+            onValueChange = {
+                searchQuery = it
+                if (showLocal) {
+                    viewModel.searchLocal(searchQuery) // call search on every text change
+                }
+            },
             label = { Text("Search by title or author") },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
@@ -58,9 +91,10 @@ fun LibraryApp(viewModel: AppViewModel) {
             )
         )
 
+
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Show manual entry dialog
+        // Manual entry dialog
         if (showManualEntry) {
             ManualEntryDialog(viewModel = viewModel) {
                 showManualEntry = false
@@ -91,6 +125,18 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
     var title by remember { mutableStateOf("") }
     var author by remember { mutableStateOf("") }
     var year by remember { mutableStateOf("") }
+    var capturedPhoto by remember { mutableStateOf<Bitmap?>(null) }
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Camera launcher
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        bitmap?.let {
+            capturedPhoto = it
+            photoUri = viewModel.saveBitmapToInternalStorage(viewModel.context, it)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -115,12 +161,35 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                     label = { Text("Year") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Photo preview
+                capturedPhoto?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = "Captured Photo",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp)
+                    )
+                }
+
+                Button(onClick = { cameraLauncher.launch() }, modifier = Modifier.padding(top = 8.dp)) {
+                    Text("Capture Photo")
+                }
             }
         },
         confirmButton = {
             Button(onClick = {
                 val yearInt = year.toIntOrNull()
-                val book = Book(title = title, author = author, year = yearInt, coverUrl = null)
+                val book = Book(
+                    title = title,
+                    author = author,
+                    year = yearInt,
+                    coverUrl = null,
+                    personalPhotoPath = photoUri?.path
+                )
                 viewModel.addToLibrary(book)
                 onDismiss()
             }) { Text("Save") }
@@ -132,24 +201,236 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
 }
 
 
+
 @Composable
 fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
-    Row(modifier = Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Row {
-            AsyncImage(
-                model = book.coverUrl,
-                contentDescription = "Book Cover",
-                modifier = Modifier.size(60.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Column {
-                Text(text = book.title, style = MaterialTheme.typography.bodyLarge)
-                Text(text = "by ${book.author}", style = MaterialTheme.typography.bodyMedium)
-                Text(text = book.year?.toString() ?: "Unknown Year", style = MaterialTheme.typography.bodySmall)
+    val context = LocalContext.current
+
+    var contactName by remember { mutableStateOf<String?>(null) }
+    var contactNumber by remember { mutableStateOf<String?>(null) }
+    var showEditDialog by remember { mutableStateOf(false) }
+
+    // Contact picker
+    val pickContactLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickContact()
+    ) { uri: Uri? ->
+        uri?.let {
+            val (name, number) = loadNameAndNumber(context.contentResolver, it)
+            if (number != null) {
+                contactName = name
+                contactNumber = number
+                val smsIntent = Intent(Intent.ACTION_SENDTO).apply {
+                    data = Uri.parse("smsto:$number")
+                    putExtra(
+                        "sms_body",
+                        "Check out this book: ${book.title} by ${book.author} (${book.year ?: "Unknown Year"})"
+                    )
+                }
+                context.startActivity(smsIntent)
+            } else {
+                Toast.makeText(context, "Selected contact has no phone number", Toast.LENGTH_SHORT).show()
             }
         }
-        if (showAddButton) {
-            Button(onClick = { viewModel.addToLibrary(book) }) { Text("Add") }
+    }
+
+    val requestPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) pickContactLauncher.launch(null)
+        else Toast.makeText(context, "Contacts permission denied", Toast.LENGTH_SHORT).show()
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .border(1.dp, Color.Gray, RoundedCornerShape(8.dp)),
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+
+            // Book Image
+            if (book.personalPhotoPath != null) {
+                val bitmap = BitmapFactory.decodeFile(book.personalPhotoPath)
+                bitmap?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = "Book Photo",
+                        modifier = Modifier
+                            .size(80.dp)
+                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                    )
+                }
+            } else if (book.coverUrl != null) {
+                AsyncImage(
+                    model = book.coverUrl,
+                    contentDescription = "Book Cover",
+                    modifier = Modifier
+                        .size(80.dp)
+                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Book Details
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp)
+            ) {
+                Text(
+                    text = book.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2
+                )
+                Text(
+                    text = "by ${book.author}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1
+                )
+                Text(
+                    text = "Published: ${book.year ?: "Unknown"}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            // Buttons
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (showAddButton) {
+                    Button(onClick = { viewModel.addToLibrary(book) }) { Text("Add") }
+                } else {
+                    Button(onClick = { showEditDialog = true }) { Text("Edit") }
+                    Button(onClick = { viewModel.deleteBook(book) }) { Text("Delete") }
+                }
+                Button(onClick = {
+                    val granted = ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.READ_CONTACTS
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (granted) pickContactLauncher.launch(null)
+                    else requestPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                }) { Text("Share") }
+            }
         }
     }
+
+    if (showEditDialog) {
+        EditBookDialog(book = book, viewModel = viewModel) { showEditDialog = false }
+    }
 }
+
+@Composable
+fun EditBookDialog(book: Book, viewModel: AppViewModel, onDismiss: () -> Unit) {
+    var title by remember { mutableStateOf(book.title) }
+    var author by remember { mutableStateOf(book.author) }
+    var year by remember { mutableStateOf(book.year?.toString() ?: "") }
+    var capturedPhoto by remember { mutableStateOf<Bitmap?>(null) }
+    var photoUri by remember { mutableStateOf(book.personalPhotoPath?.let { Uri.parse(it) }) }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        bitmap?.let {
+            capturedPhoto = it
+            photoUri = viewModel.saveBitmapToInternalStorage(viewModel.context, it)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Book") },
+        text = {
+            Column {
+                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") })
+                OutlinedTextField(value = author, onValueChange = { author = it }, label = { Text("Author") })
+                OutlinedTextField(value = year, onValueChange = { year = it }, label = { Text("Year") })
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Photo preview
+                capturedPhoto?.let { bitmap ->
+                    Image(bitmap = bitmap.asImageBitmap(), contentDescription = "Book Photo", modifier = Modifier.height(150.dp))
+                }
+
+                Button(onClick = { cameraLauncher.launch() }, modifier = Modifier.padding(top = 8.dp)) {
+                    Text("Capture Photo")
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val yearInt = year.toIntOrNull()
+                val updatedBook = book.copy(
+                    title = title,
+                    author = author,
+                    year = yearInt,
+                    personalPhotoPath = photoUri?.path
+                )
+                viewModel.updateBook(updatedBook)
+                onDismiss()
+            }) { Text("Save") }
+        },
+        dismissButton = { Button(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+
+
+/**
+ * Safe function to get display name and phone number from a contact Uri.
+ */
+private fun loadNameAndNumber(
+    resolver: android.content.ContentResolver,
+    contactUri: Uri
+): Pair<String?, String?> {
+    var id: String? = null
+    var name: String? = null
+
+    val contactsProjection = arrayOf(
+        ContactsContract.Contacts._ID,
+        ContactsContract.Contacts.DISPLAY_NAME
+    )
+
+    resolver.query(contactUri, contactsProjection, null, null, null)?.use { c ->
+        if (c.moveToFirst()) {
+            id = c.getString(c.getColumnIndexOrThrow(ContactsContract.Contacts._ID))
+            name = c.getString(c.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME))
+        }
+    }
+
+    var number: String? = null
+    if (id != null) {
+        val phoneProjection = arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER)
+        resolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            phoneProjection,
+            "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID}=?",
+            arrayOf(id),
+            null
+        )?.use { pc ->
+            if (pc.moveToFirst()) {
+                number = pc.getString(pc.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER))
+            }
+        }
+    }
+
+    return name to number
+}
+
+
+
+
+
+
+
+
+
+

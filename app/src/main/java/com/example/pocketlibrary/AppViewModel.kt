@@ -1,6 +1,9 @@
 package com.example.pocketlibrary
-
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
+import java.io.File
+import java.io.FileOutputStream
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -8,7 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-class AppViewModel(private val context: Context) : ViewModel() {
+
+class AppViewModel(val context: Context) : ViewModel() {
 
     private val repository = BookRepository(context)
 
@@ -24,6 +28,9 @@ class AppViewModel(private val context: Context) : ViewModel() {
     // Local library
     private val _myLibrary = MutableStateFlow<List<Book>>(emptyList())
     val myLibrary: StateFlow<List<Book>> = _myLibrary
+
+
+
 
     fun searchOnline(query: String) {
         if (query.isBlank()) return
@@ -56,11 +63,45 @@ class AppViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun searchLocal(query: String) {
-        viewModelScope.launch {
-            _myLibrary.value = repository.searchLocal(query)
+
+    fun saveBitmapToInternalStorage(context: Context, bitmap: Bitmap): Uri? {
+        return try {
+            val filename = "book_${System.currentTimeMillis()}.jpg"
+            val file = File(context.filesDir, filename)
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
+            }
+            Uri.fromFile(file)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
+    fun deleteBook(book: Book) {
+        viewModelScope.launch {
+            repository.deleteBook(book)
+            loadMyLibrary() // refresh the list
+        }
+    }
+    fun updateBook(book: Book) {
+        viewModelScope.launch {
+            repository.updateBook(book)
+            loadMyLibrary() // refresh
+        }
+    }
+
+
+    fun searchLocal(query: String) {
+        viewModelScope.launch {
+            if (query.isBlank()) {
+                // If search query is empty, load all books
+                _myLibrary.value = repository.getAllLocalBooks()
+            } else {
+                _myLibrary.value = repository.searchLocal(query)
+            }
+        }
+    }
+
 }
 
 class AppViewModelFactory(private val context: Context) : ViewModelProvider.Factory {

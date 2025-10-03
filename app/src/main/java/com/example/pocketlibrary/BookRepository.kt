@@ -35,9 +35,14 @@ class BookRepository(context: Context) {
         bookDao.delete(book)
     }
 
-    suspend fun searchLocal(query: String): List<Book> = withContext(Dispatchers.IO) {
-        bookDao.search(query)
+    suspend fun searchLocal(query: String, sortByAuthor: Boolean = false): List<Book> {
+        val results = bookDao.search(query)
+        return if (sortByAuthor)
+            results.sortedBy { it.author.lowercase() }
+        else
+            results.sortedBy { it.title.lowercase() }
     }
+
 
     suspend fun getAllLocalBooks(): List<Book> = withContext(Dispatchers.IO) {
         bookDao.getAllBooks()
