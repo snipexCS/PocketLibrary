@@ -10,7 +10,6 @@ import android.provider.ContactsContract
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.launch
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -26,63 +25,54 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import java.io.File
 
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
+
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
 
 
 @Composable
 fun LibraryApp(viewModel: AppViewModel) {
-    var searchQuery by remember { mutableStateOf("") }
-    var showLocal by remember { mutableStateOf(false) }
-    var showManualEntry by remember { mutableStateOf(false) }
+    val configuration = LocalConfiguration.current
+    val screenWidthDp = configuration.screenWidthDp
+    val isTablet = screenWidthDp >= 600
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
-    val searchResults by viewModel.searchResults.collectAsState()
-    val myLibrary by viewModel.myLibrary.collectAsState()
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var showLocal by rememberSaveable { mutableStateOf(false) }
+    var showManualEntry by rememberSaveable { mutableStateOf(false) }
+
+    val searchResults by viewModel.searchResults.collectAsState(initial = emptyList())
+    val myLibrary by viewModel.myLibrary.collectAsState(initial = emptyList())
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
 
-    Column(modifier = Modifier.fillMaxSize().padding(6.dp).padding(top = 30.dp)) {
+    val booksToShow = if (showLocal) myLibrary else searchResults
 
-        // Top buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceAround
-        ) {
-            Row {
-                Button(onClick = {
-                    showLocal = false
-                    viewModel.searchOnline(searchQuery)
-                }) { Text("Search Online") }
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .padding(8.dp)) {
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Button(onClick = {
-                    showLocal = true
-                    viewModel.loadMyLibrary()
-                }) { Text("My Library") }
-            }
-
-            Button(onClick = { showManualEntry = true }) { Text("Add Book") }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Search field
+        // Search Field
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = {
-                searchQuery = it
-                if (showLocal) viewModel.searchLocal(searchQuery)
-            },
+            onValueChange = { searchQuery = it },
             label = { Text("Search by title or author") },
             modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default.copy(
-                imeAction = androidx.compose.ui.text.input.ImeAction.Search
-            ),
-            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
                 onSearch = {
                     if (showLocal) viewModel.searchLocal(searchQuery)
                     else viewModel.searchOnline(searchQuery)
@@ -92,35 +82,106 @@ fun LibraryApp(viewModel: AppViewModel) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Manual entry dialog
-        if (showManualEntry) {
-            ManualEntryDialog(viewModel = viewModel) {
-                showManualEntry = false
-            }
+        // Buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Button(onClick = {
+                showLocal = false
+                viewModel.searchOnline(searchQuery)
+            }) { Text("Search Online") }
+
+            Button(onClick = {
+                showLocal = true
+                viewModel.loadMyLibrary()
+            }) { Text("My Library") }
+
+            Button(onClick = { showManualEntry = true }) { Text("Add Book") }
         }
 
-        // Loading / Error / Book list
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Manual Entry Dialog
+        if (showManualEntry) {
+            ManualEntryDialog(viewModel) { showManualEntry = false }
+        }
+
+        // Loading / Error / Book List
         when {
-            isLoading -> CircularProgressIndicator(
-                modifier = Modifier.align(androidx.compose.ui.Alignment.CenterHorizontally)
-            )
-            error != null -> Text(text = error ?: "Unknown error", color = MaterialTheme.colorScheme.error)
-            showLocal -> BookList(books = myLibrary, viewModel = viewModel, showAddButton = false)
-            else -> BookList(books = searchResults, viewModel = viewModel, showAddButton = true)
+            isLoading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            error != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(text = error ?: "Unknown error", color = MaterialTheme.colorScheme.error)
+            }
+            booksToShow.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(if (showLocal) "Your library is empty" else "No books found")
+            }
+            else -> {
+                // Use grid for tablet or landscape, list for portrait phone
+                val isGrid = isTablet || isLandscape
+                BookList(
+                    books = booksToShow,
+                    viewModel = viewModel,
+                    showAddButton = !showLocal,
+                    modifier = Modifier.fillMaxSize(),
+                    isGrid = isGrid
+                )
+            }
         }
     }
 }
+
 
 
 @Composable
-fun BookList(books: List<Book>, viewModel: AppViewModel, showAddButton: Boolean) {
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(books, key = { it.id.takeIf { it != 0 } ?: "${it.title}-${it.author}-${it.year}".hashCode() }) { book ->
-            BookItem(book, viewModel, showAddButton)
-            HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
+fun BookList(
+    books: List<Book>,
+    viewModel: AppViewModel,
+    showAddButton: Boolean,
+    modifier: Modifier = Modifier,
+    isGrid: Boolean = false
+) {
+    if (isGrid) {
+        val configuration = LocalConfiguration.current
+        val screenWidthDp = configuration.screenWidthDp
+
+        // Determine number of columns: Tablet 2+, Phone landscape 1
+        val columns = if (screenWidthDp >= 600) 2 else 1
+        val spacing = if (columns > 1) 12.dp else 4.dp
+
+        val gridState = rememberLazyGridState()
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            state = gridState,
+            modifier = modifier.fillMaxSize(),
+            contentPadding = PaddingValues(spacing),
+            horizontalArrangement = Arrangement.spacedBy(spacing),
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            items(books, key = { it.id.takeIf { it != 0 } ?: "${it.title}-${it.author}-${it.year}".hashCode() }) { book ->
+                BookItem(book, viewModel, showAddButton)
+            }
+        }
+    } else {
+        val listState = rememberLazyListState()
+        LazyColumn(
+            state = listState,
+            modifier = modifier.fillMaxSize(),
+            contentPadding = PaddingValues(4.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(books, key = { it.id.takeIf { it != 0 } ?: "${it.title}-${it.author}-${it.year}".hashCode() }) { book ->
+                BookItem(book, viewModel, showAddButton)
+            }
         }
     }
 }
+
+
+
 @Composable
 fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
     var title by remember { mutableStateOf("") }
@@ -174,7 +235,7 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                     )
                 }
 
-                Button(onClick = { cameraLauncher.launch() }, modifier = Modifier.padding(top = 8.dp)) {
+                Button(onClick = { cameraLauncher.launch(null) }, modifier = Modifier.padding(top = 8.dp)) {
                     Text("Capture Photo")
                 }
             }
@@ -189,18 +250,13 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                     coverUrl = null,
                     personalPhotoPath = photoUri?.path
                 )
-                viewModel.addToLibrary(book) // ✅ This now syncs to Firestore automatically
+                viewModel.addToLibrary(book)
                 onDismiss()
             }) { Text("Save") }
         },
-        dismissButton = {
-            Button(onClick = onDismiss) { Text("Cancel") }
-        }
+        dismissButton = { Button(onClick = onDismiss) { Text("Cancel") } }
     )
 }
-
-
-
 
 @Composable
 fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
@@ -218,15 +274,22 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
         Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
 
             // Image
-            if (book.personalPhotoPath != null) {
-                val bitmap = BitmapFactory.decodeFile(book.personalPhotoPath)
-                bitmap?.let {
-                    Image(bitmap = it.asImageBitmap(), contentDescription = "Book Photo",
-                        modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp)))
-                }
+            val bitmap = remember(book.personalPhotoPath, book.coverUrl) {
+                book.personalPhotoPath?.let { BitmapFactory.decodeFile(it) }
+            }
+
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Book Photo",
+                    modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                )
             } else if (book.coverUrl != null) {
-                AsyncImage(model = book.coverUrl, contentDescription = "Book Cover",
-                    modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp)))
+                AsyncImage(
+                    model = book.coverUrl,
+                    contentDescription = "Book Cover",
+                    modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                )
             } else {
                 Box(modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp)))
             }
@@ -244,9 +307,11 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (showAddButton) {
                     Button(onClick = { viewModel.addToLibrary(book) }) { Text("Add") }
+                    ShareBookButton(book)
                 } else {
                     Button(onClick = { showEditDialog = true }) { Text("Edit") }
                     Button(onClick = { viewModel.deleteBook(book) }) { Text("Delete") }
+                    ShareBookButton(book)
                 }
             }
         }
@@ -257,6 +322,61 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
     }
 }
 
+@Composable
+fun ShareBookButton(book: Book) {
+    val context = LocalContext.current
+
+    val pickContactLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickContact()
+    ) { contactUri: Uri? ->
+        if (contactUri != null) {
+            val (_, number) = loadNameAndNumber(context.contentResolver, contactUri)
+            number?.let { phone ->
+                val smsIntent = Intent(Intent.ACTION_SENDTO)
+                smsIntent.data = Uri.parse("smsto:$phone")
+                smsIntent.putExtra(
+                    "sms_body",
+                    "Check out this book!\nTitle: ${book.title}\nAuthor: ${book.author}\nPublished: ${book.year ?: "Unknown"}"
+                )
+
+                // Include image if available
+                book.personalPhotoPath?.let {
+                    val imageUri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        File(it)
+                    )
+                    smsIntent.type = "image/*"
+                    smsIntent.putExtra(Intent.EXTRA_STREAM, imageUri)
+                    smsIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                context.startActivity(Intent.createChooser(smsIntent, "Share via"))
+            } ?: Toast.makeText(context, "No phone number found", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "No contact selected", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val requestPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) pickContactLauncher.launch(null)
+        else Toast.makeText(context, "Permission denied", Toast.LENGTH_SHORT).show()
+    }
+
+    Button(onClick = {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (granted) pickContactLauncher.launch(null)
+        else requestPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+    }) {
+        Text("Share")
+    }
+}
 
 @Composable
 fun EditBookDialog(book: Book, viewModel: AppViewModel, onDismiss: () -> Unit) {
@@ -286,12 +406,11 @@ fun EditBookDialog(book: Book, viewModel: AppViewModel, onDismiss: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Photo preview
                 capturedPhoto?.let { bitmap ->
                     Image(bitmap = bitmap.asImageBitmap(), contentDescription = "Book Photo", modifier = Modifier.height(150.dp))
                 }
 
-                Button(onClick = { cameraLauncher.launch() }, modifier = Modifier.padding(top = 8.dp)) {
+                Button(onClick = { cameraLauncher.launch(null) }, modifier = Modifier.padding(top = 8.dp)) {
                     Text("Capture Photo")
                 }
             }
@@ -312,8 +431,6 @@ fun EditBookDialog(book: Book, viewModel: AppViewModel, onDismiss: () -> Unit) {
         dismissButton = { Button(onClick = onDismiss) { Text("Cancel") } }
     )
 }
-
-
 
 /**
  * Safe function to get display name and phone number from a contact Uri.
@@ -355,13 +472,3 @@ private fun loadNameAndNumber(
 
     return name to number
 }
-
-
-
-
-
-
-
-
-
-

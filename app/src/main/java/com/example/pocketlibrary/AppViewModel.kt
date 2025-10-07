@@ -32,9 +32,12 @@ class AppViewModel(val context: Context) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            syncLibrary()
+            val remoteBooks = try { firestore.fetchFavourites(userId) } catch (e: Exception) { emptyList() }
+            val localBooks = repository.getAllLocalBooks()
+            _myLibrary.value = mergeLocalAndRemote(remoteBooks, localBooks)
         }
     }
+
 
     /**
      * Fetch Firestore favourites and merge with local DB without creating duplicates.
@@ -54,6 +57,16 @@ class AppViewModel(val context: Context) : ViewModel() {
         // Update UI state with merged list
         _myLibrary.value = localBooks + newBooks
     }
+    private suspend fun mergeLocalAndRemote(remote: List<Book>, local: List<Book>): List<Book> {
+        val localIds = local.map { it.id }.toSet()
+        val remoteToInsert = remote.filter { it.id !in localIds }
+
+        // Only insert if book is not already in local DB
+        remoteToInsert.forEach { repository.insertBook(it) }
+
+        return (local + remoteToInsert).distinctBy { it.id }
+    }
+
 
     // --- Online search ---
     fun searchOnline(query: String) {
@@ -111,10 +124,15 @@ class AppViewModel(val context: Context) : ViewModel() {
     fun deleteBook(book: Book) {
         viewModelScope.launch {
             repository.deleteBook(book)
+            try {
+                firestore.deleteBook(userId, book.id) // delete from Firestore
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
             _myLibrary.value = repository.getAllLocalBooks()
-            try { firestore.deleteBook(userId, book.id) } catch (e: Exception) { e.printStackTrace() }
         }
     }
+
 
     // --- Generate stable ID ---
     private fun generateStableId(book: Book): Int {
