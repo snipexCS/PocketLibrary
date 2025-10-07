@@ -1,20 +1,20 @@
 package com.example.pocketlibrary
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
-import java.io.File
-import java.io.FileOutputStream
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-
 class AppViewModel(val context: Context) : ViewModel() {
 
     private val repository = BookRepository(context)
+    private val firestore = FirestoreRepository()
 
     private val _searchResults = MutableStateFlow<List<Book>>(emptyList())
     val searchResults: StateFlow<List<Book>> = _searchResults
@@ -25,16 +25,39 @@ class AppViewModel(val context: Context) : ViewModel() {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
-    // Local library
     private val _myLibrary = MutableStateFlow<List<Book>>(emptyList())
     val myLibrary: StateFlow<List<Book>> = _myLibrary
 
+    private val userId = "default_user"
 
+    init {
+        viewModelScope.launch {
+            syncLibrary()
+        }
+    }
 
+    /**
+     * Fetch Firestore favourites and merge with local DB without creating duplicates.
+     */
+    private suspend fun syncLibrary() {
+        val localBooks = repository.getAllLocalBooks()
+        val remoteBooks = try { firestore.fetchFavourites(userId) } catch (e: Exception) { emptyList() }
 
+        // Build a set of existing local IDs to prevent duplicates
+        val existingIds = localBooks.map { it.id }.toSet()
+
+        // Only insert remote books if their ID is not in local DB
+        val newBooks = remoteBooks.filter { it.id !in existingIds }
+
+        newBooks.forEach { repository.insertBook(it) }
+
+        // Update UI state with merged list
+        _myLibrary.value = localBooks + newBooks
+    }
+
+    // --- Online search ---
     fun searchOnline(query: String) {
         if (query.isBlank()) return
-
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
@@ -50,25 +73,60 @@ class AppViewModel(val context: Context) : ViewModel() {
         }
     }
 
+    // --- Local library ---
     fun loadMyLibrary() {
         viewModelScope.launch {
             _myLibrary.value = repository.getAllLocalBooks()
         }
     }
 
-    fun addToLibrary(book: Book) {
+    fun searchLocal(query: String) {
         viewModelScope.launch {
-            repository.insertBook(book)
-            loadMyLibrary()
+            _myLibrary.value = if (query.isBlank()) repository.getAllLocalBooks()
+            else repository.searchLocal(query)
         }
     }
 
+    fun addToLibrary(book: Book) {
+        viewModelScope.launch {
+            // Generate a consistent ID if missing
+            val stableId = if (book.id != 0) book.id else generateStableId(book)
+            val newBook = book.copy(id = stableId)
 
+            repository.insertBook(newBook)
+            _myLibrary.value = repository.getAllLocalBooks()
+
+            try { firestore.uploadBook(userId, newBook) } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    fun updateBook(book: Book) {
+        viewModelScope.launch {
+            repository.updateBook(book)
+            _myLibrary.value = repository.getAllLocalBooks()
+            try { firestore.uploadBook(userId, book) } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    fun deleteBook(book: Book) {
+        viewModelScope.launch {
+            repository.deleteBook(book)
+            _myLibrary.value = repository.getAllLocalBooks()
+            try { firestore.deleteBook(userId, book.id) } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    // --- Generate stable ID ---
+    private fun generateStableId(book: Book): Int {
+        return (book.title + book.author + (book.year ?: 0)).hashCode()
+    }
+
+    // --- Image saving ---
     fun saveBitmapToInternalStorage(context: Context, bitmap: Bitmap): Uri? {
         return try {
             val filename = "book_${System.currentTimeMillis()}.jpg"
-            val file = File(context.filesDir, filename)
-            FileOutputStream(file).use { out ->
+            val file = java.io.File(context.filesDir, filename)
+            java.io.FileOutputStream(file).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
             }
             Uri.fromFile(file)
@@ -77,32 +135,8 @@ class AppViewModel(val context: Context) : ViewModel() {
             null
         }
     }
-    fun deleteBook(book: Book) {
-        viewModelScope.launch {
-            repository.deleteBook(book)
-            loadMyLibrary() // refresh the list
-        }
-    }
-    fun updateBook(book: Book) {
-        viewModelScope.launch {
-            repository.updateBook(book)
-            loadMyLibrary() // refresh
-        }
-    }
-
-
-    fun searchLocal(query: String) {
-        viewModelScope.launch {
-            if (query.isBlank()) {
-                // If search query is empty, load all books
-                _myLibrary.value = repository.getAllLocalBooks()
-            } else {
-                _myLibrary.value = repository.searchLocal(query)
-            }
-        }
-    }
-
 }
+
 
 class AppViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {

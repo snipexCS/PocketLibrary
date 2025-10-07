@@ -44,14 +44,14 @@ fun LibraryApp(viewModel: AppViewModel) {
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
 
-    Column(modifier = Modifier.fillMaxSize().padding(6.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(6.dp).padding(top = 30.dp)) {
 
-        // --- Top buttons row ---
+        // Top buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceAround
         ) {
-            Row { // LEFT SIDE
+            Row {
                 Button(onClick = {
                     showLocal = false
                     viewModel.searchOnline(searchQuery)
@@ -65,32 +65,30 @@ fun LibraryApp(viewModel: AppViewModel) {
                 }) { Text("My Library") }
             }
 
-            Button(onClick = { showManualEntry = true }) { // RIGHT SIDE
-                Text("Add Book")
-            }
+            Button(onClick = { showManualEntry = true }) { Text("Add Book") }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        // Search field
         OutlinedTextField(
             value = searchQuery,
             onValueChange = {
                 searchQuery = it
-                if (showLocal) {
-                    viewModel.searchLocal(searchQuery) // call search on every text change
-                }
+                if (showLocal) viewModel.searchLocal(searchQuery)
             },
             label = { Text("Search by title or author") },
             modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default.copy(
+                imeAction = androidx.compose.ui.text.input.ImeAction.Search
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                 onSearch = {
                     if (showLocal) viewModel.searchLocal(searchQuery)
                     else viewModel.searchOnline(searchQuery)
                 }
             )
         )
-
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -101,15 +99,18 @@ fun LibraryApp(viewModel: AppViewModel) {
             }
         }
 
-        // Loading / Error / List
+        // Loading / Error / Book list
         when {
-            isLoading -> CircularProgressIndicator(modifier = Modifier.align(alignment = androidx.compose.ui.Alignment.CenterHorizontally))
-            error != null -> Text(text = error!!, color = MaterialTheme.colorScheme.error)
+            isLoading -> CircularProgressIndicator(
+                modifier = Modifier.align(androidx.compose.ui.Alignment.CenterHorizontally)
+            )
+            error != null -> Text(text = error ?: "Unknown error", color = MaterialTheme.colorScheme.error)
             showLocal -> BookList(books = myLibrary, viewModel = viewModel, showAddButton = false)
             else -> BookList(books = searchResults, viewModel = viewModel, showAddButton = true)
         }
     }
 }
+
 
 @Composable
 fun BookList(books: List<Book>, viewModel: AppViewModel, showAddButton: Boolean) {
@@ -128,7 +129,6 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
     var capturedPhoto by remember { mutableStateOf<Bitmap?>(null) }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Camera launcher
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap: Bitmap? ->
@@ -164,7 +164,6 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Photo preview
                 capturedPhoto?.let {
                     Image(
                         bitmap = it.asImageBitmap(),
@@ -190,7 +189,7 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                     coverUrl = null,
                     personalPhotoPath = photoUri?.path
                 )
-                viewModel.addToLibrary(book)
+                viewModel.addToLibrary(book) // ✅ This now syncs to Firestore automatically
                 onDismiss()
             }) { Text("Save") }
         },
@@ -202,43 +201,11 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
 
 
 
+
 @Composable
 fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
     val context = LocalContext.current
-
-    var contactName by remember { mutableStateOf<String?>(null) }
-    var contactNumber by remember { mutableStateOf<String?>(null) }
     var showEditDialog by remember { mutableStateOf(false) }
-
-    // Contact picker
-    val pickContactLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickContact()
-    ) { uri: Uri? ->
-        uri?.let {
-            val (name, number) = loadNameAndNumber(context.contentResolver, it)
-            if (number != null) {
-                contactName = name
-                contactNumber = number
-                val smsIntent = Intent(Intent.ACTION_SENDTO).apply {
-                    data = Uri.parse("smsto:$number")
-                    putExtra(
-                        "sms_body",
-                        "Check out this book: ${book.title} by ${book.author} (${book.year ?: "Unknown Year"})"
-                    )
-                }
-                context.startActivity(smsIntent)
-            } else {
-                Toast.makeText(context, "Selected contact has no phone number", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    val requestPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) pickContactLauncher.launch(null)
-        else Toast.makeText(context, "Contacts permission denied", Toast.LENGTH_SHORT).show()
-    }
 
     Card(
         modifier = Modifier
@@ -250,56 +217,27 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
     ) {
         Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
 
-            // Book Image
+            // Image
             if (book.personalPhotoPath != null) {
                 val bitmap = BitmapFactory.decodeFile(book.personalPhotoPath)
                 bitmap?.let {
-                    Image(
-                        bitmap = it.asImageBitmap(),
-                        contentDescription = "Book Photo",
-                        modifier = Modifier
-                            .size(80.dp)
-                            .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                    )
+                    Image(bitmap = it.asImageBitmap(), contentDescription = "Book Photo",
+                        modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp)))
                 }
             } else if (book.coverUrl != null) {
-                AsyncImage(
-                    model = book.coverUrl,
-                    contentDescription = "Book Cover",
-                    modifier = Modifier
-                        .size(80.dp)
-                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                )
+                AsyncImage(model = book.coverUrl, contentDescription = "Book Cover",
+                    modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp)))
             } else {
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                )
+                Box(modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp)))
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Book Details
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 8.dp)
-            ) {
-                Text(
-                    text = book.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 2
-                )
-                Text(
-                    text = "by ${book.author}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1
-                )
-                Text(
-                    text = "Published: ${book.year ?: "Unknown"}",
-                    style = MaterialTheme.typography.bodySmall
-                )
+            // Details
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(text = book.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
+                Text(text = "by ${book.author}", style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                Text(text = "Published: ${book.year ?: "Unknown"}", style = MaterialTheme.typography.bodySmall)
             }
 
             // Buttons
@@ -310,14 +248,6 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
                     Button(onClick = { showEditDialog = true }) { Text("Edit") }
                     Button(onClick = { viewModel.deleteBook(book) }) { Text("Delete") }
                 }
-                Button(onClick = {
-                    val granted = ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.READ_CONTACTS
-                    ) == PackageManager.PERMISSION_GRANTED
-
-                    if (granted) pickContactLauncher.launch(null)
-                    else requestPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-                }) { Text("Share") }
             }
         }
     }
@@ -326,6 +256,7 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
         EditBookDialog(book = book, viewModel = viewModel) { showEditDialog = false }
     }
 }
+
 
 @Composable
 fun EditBookDialog(book: Book, viewModel: AppViewModel, onDismiss: () -> Unit) {

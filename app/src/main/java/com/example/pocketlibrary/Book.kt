@@ -10,12 +10,12 @@ data class Book(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
     @ColumnInfo(name = "title")
-    val title: String,
+    val title: String = "",
     @ColumnInfo(name = "author")
-    val author: String,
+    val author:String = "",
     @ColumnInfo(name = "year")
-    val year: Int?,
-    val coverUrl: String?,
+    val year: Int?= null,
+    val coverUrl: String?= null,
     val personalPhotoPath: String? = null
 
 
