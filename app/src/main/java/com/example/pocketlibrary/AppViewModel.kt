@@ -6,11 +6,19 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
+/**
+ * ViewModel that exposes:
+ * - searchResults (online)
+ * - myLibrary (local + merged remote)
+ *
+ * It now supports:
+ * - searchLocal(query, filter, sort)
+ * - sorting and filter state flows for UI to observe (optional)
+ */
 class AppViewModel(val context: Context) : ViewModel() {
 
     private val repository = BookRepository(context)
@@ -28,6 +36,13 @@ class AppViewModel(val context: Context) : ViewModel() {
     private val _myLibrary = MutableStateFlow<List<Book>>(emptyList())
     val myLibrary: StateFlow<List<Book>> = _myLibrary
 
+    // Optional: expose current filter/sort state so UI can reflect them
+    private val _currentFilter = MutableStateFlow(FilterType.TITLE)
+    val currentFilter: StateFlow<FilterType> = _currentFilter
+
+    private val _currentSort = MutableStateFlow(SortOption.NONE)
+    val currentSort: StateFlow<SortOption> = _currentSort
+
     private val userId = "default_user"
 
     init {
@@ -38,7 +53,6 @@ class AppViewModel(val context: Context) : ViewModel() {
         }
     }
 
-
     /**
      * Fetch Firestore favourites and merge with local DB without creating duplicates.
      */
@@ -46,22 +60,18 @@ class AppViewModel(val context: Context) : ViewModel() {
         val localBooks = repository.getAllLocalBooks()
         val remoteBooks = try { firestore.fetchFavourites(userId) } catch (e: Exception) { emptyList() }
 
-        // Build a set of existing local IDs to prevent duplicates
         val existingIds = localBooks.map { it.id }.toSet()
-
-        // Only insert remote books if their ID is not in local DB
         val newBooks = remoteBooks.filter { it.id !in existingIds }
 
         newBooks.forEach { repository.insertBook(it) }
 
-        // Update UI state with merged list
         _myLibrary.value = localBooks + newBooks
     }
+
     private suspend fun mergeLocalAndRemote(remote: List<Book>, local: List<Book>): List<Book> {
         val localIds = local.map { it.id }.toSet()
         val remoteToInsert = remote.filter { it.id !in localIds }
 
-        // Only insert if book is not already in local DB
         remoteToInsert.forEach { repository.insertBook(it) }
 
         return (local + remoteToInsert).distinctBy { it.id }
@@ -86,28 +96,68 @@ class AppViewModel(val context: Context) : ViewModel() {
         }
     }
 
-    // --- Local library ---
+    // --- Local library load ---
     fun loadMyLibrary() {
         viewModelScope.launch {
             _myLibrary.value = repository.getAllLocalBooks()
         }
     }
 
-    fun searchLocal(query: String) {
+    /**
+     * Search local books with filter and sort.
+     * - query: text to match (blank => return all)
+     * - filter: FilterType.TITLE or FilterType.AUTHOR
+     * - sort: SortOption (NONE means preserve repository order or natural order)
+     *
+     * This implementation pulls all local books and applies filter+sort in-memory.
+     * That guarantees consistent behaviour independent of repository implementation.
+     */
+    fun searchLocal(query: String, filter: FilterType = FilterType.TITLE, sort: SortOption = SortOption.NONE) {
         viewModelScope.launch {
-            _myLibrary.value = if (query.isBlank()) repository.getAllLocalBooks()
-            else repository.searchLocal(query)
+            // remember chosen filter/sort so UI can display it
+            _currentFilter.value = filter
+            _currentSort.value = sort
+
+            val all = repository.getAllLocalBooks()
+            val filtered = if (query.isBlank()) {
+                all
+            } else {
+                when (filter) {
+                    FilterType.AUTHOR -> all.filter { it.author.contains(query, ignoreCase = true) }
+                    FilterType.TITLE -> all.filter { it.title.contains(query, ignoreCase = true) }
+                }
+            }
+
+            val sorted = applySort(filtered, sort)
+            _myLibrary.value = sorted
         }
     }
 
+    // helper to apply sorting
+    private fun applySort(list: List<Book>, sort: SortOption): List<Book> {
+        return when (sort) {
+            SortOption.TITLE_ASC -> list.sortedBy { it.title.lowercase() }
+            SortOption.TITLE_DESC -> list.sortedByDescending { it.title.lowercase() }
+            SortOption.AUTHOR_ASC -> list.sortedBy { it.author.lowercase() }
+            SortOption.AUTHOR_DESC -> list.sortedByDescending { it.author.lowercase() }
+            SortOption.YEAR_ASC -> list.sortedWith(compareBy(nullsLast()) { it.year ?: Int.MIN_VALUE })
+            SortOption.YEAR_DESC -> list.sortedWith(compareByDescending(nullsLast<Int>()) { it.year ?: Int.MIN_VALUE })
+            SortOption.NONE -> list
+        }
+    }
+
+    // --- CRUD operations that keep Firestore in sync ---
     fun addToLibrary(book: Book) {
         viewModelScope.launch {
-            // Generate a consistent ID if missing
             val stableId = if (book.id != 0) book.id else generateStableId(book)
             val newBook = book.copy(id = stableId)
 
             repository.insertBook(newBook)
-            _myLibrary.value = repository.getAllLocalBooks()
+
+            // refresh local state (respect current filter/sort if present)
+            val currentFilter = _currentFilter.value
+            val currentSort = _currentSort.value
+            searchLocal("", currentFilter, currentSort)
 
             try { firestore.uploadBook(userId, newBook) } catch (e: Exception) { e.printStackTrace() }
         }
@@ -116,7 +166,9 @@ class AppViewModel(val context: Context) : ViewModel() {
     fun updateBook(book: Book) {
         viewModelScope.launch {
             repository.updateBook(book)
-            _myLibrary.value = repository.getAllLocalBooks()
+            val currentFilter = _currentFilter.value
+            val currentSort = _currentSort.value
+            searchLocal("", currentFilter, currentSort)
             try { firestore.uploadBook(userId, book) } catch (e: Exception) { e.printStackTrace() }
         }
     }
@@ -129,7 +181,9 @@ class AppViewModel(val context: Context) : ViewModel() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-            _myLibrary.value = repository.getAllLocalBooks()
+            val currentFilter = _currentFilter.value
+            val currentSort = _currentSort.value
+            searchLocal("", currentFilter, currentSort)
         }
     }
 
@@ -155,6 +209,17 @@ class AppViewModel(val context: Context) : ViewModel() {
     }
 }
 
+/**
+ * Filter types and Sorting options exposed by the ViewModel
+ */
+enum class FilterType { TITLE, AUTHOR }
+
+enum class SortOption {
+    NONE,
+    TITLE_ASC, TITLE_DESC,
+    AUTHOR_ASC, AUTHOR_DESC,
+    YEAR_ASC, YEAR_DESC
+}
 
 class AppViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {

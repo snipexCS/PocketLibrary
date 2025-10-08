@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,30 +60,47 @@ fun LibraryApp(viewModel: AppViewModel) {
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
 
+    // 🔹 Observe filter and sort states from ViewModel
+    val currentFilter by viewModel.currentFilter.collectAsState()
+    val currentSort by viewModel.currentSort.collectAsState()
+
     val booksToShow = if (showLocal) myLibrary else searchResults
 
     Column(modifier = Modifier
         .fillMaxSize()
         .padding(8.dp)) {
 
-        // Search Field
+        // 🔹 Search Field
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = { searchQuery = it },
+            onValueChange = { query ->
+                searchQuery = query
+                if (showLocal) {
+                    // 🔹 Call local search immediately on text change
+                    viewModel.searchLocal(
+                        query,
+                        currentFilter,
+                        currentSort
+                    )
+                } else {
+                    // 🔹 Optional: live online search (may want debounce to avoid too many requests)
+                    viewModel.searchOnline(query)
+                }
+            },
             label = { Text("Search by title or author") },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(
                 onSearch = {
-                    if (showLocal) viewModel.searchLocal(searchQuery)
-                    else viewModel.searchOnline(searchQuery)
+                    if (!showLocal) viewModel.searchOnline(searchQuery)
                 }
             )
         )
 
+
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Buttons
+        // 🔹 Top Action Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -100,14 +118,62 @@ fun LibraryApp(viewModel: AppViewModel) {
             Button(onClick = { showManualEntry = true }) { Text("Add Book") }
         }
 
+        // 🔹 Filter + Sort Controls (only for local view)
+        if (showLocal) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DropdownSelector(
+                    label = "Filter by",
+                    options = listOf("Title", "Author"),
+                    selected = currentFilter.name.lowercase().replaceFirstChar { it.uppercase() }
+                ) { selected ->
+                    val filter = if (selected == "Author") FilterType.AUTHOR else FilterType.TITLE
+                    viewModel.searchLocal(searchQuery, filter, currentSort)
+                }
+
+                DropdownSelector(
+                    label = "Sort by",
+                    options = listOf(
+                        "None", "Title (A–Z)", "Title (Z–A)",
+                        "Author (A–Z)", "Author (Z–A)",
+                        "Year (Oldest)", "Year (Newest)"
+                    ),
+                    selected = when (currentSort) {
+                        SortOption.TITLE_ASC -> "Title (A–Z)"
+                        SortOption.TITLE_DESC -> "Title (Z–A)"
+                        SortOption.AUTHOR_ASC -> "Author (A–Z)"
+                        SortOption.AUTHOR_DESC -> "Author (Z–A)"
+                        SortOption.YEAR_ASC -> "Year (Oldest)"
+                        SortOption.YEAR_DESC -> "Year (Newest)"
+                        SortOption.NONE -> "None"
+                    }
+                ) { selected ->
+                    val sort = when (selected) {
+                        "Title (A–Z)" -> SortOption.TITLE_ASC
+                        "Title (Z–A)" -> SortOption.TITLE_DESC
+                        "Author (A–Z)" -> SortOption.AUTHOR_ASC
+                        "Author (Z–A)" -> SortOption.AUTHOR_DESC
+                        "Year (Oldest)" -> SortOption.YEAR_ASC
+                        "Year (Newest)" -> SortOption.YEAR_DESC
+                        else -> SortOption.NONE
+                    }
+                    viewModel.searchLocal(searchQuery, currentFilter, sort)
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Manual Entry Dialog
+        // 🔹 Manual Entry Dialog
         if (showManualEntry) {
             ManualEntryDialog(viewModel) { showManualEntry = false }
         }
 
-        // Loading / Error / Book List
+        // 🔹 Loading / Error / Book List
         when {
             isLoading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -119,7 +185,6 @@ fun LibraryApp(viewModel: AppViewModel) {
                 Text(if (showLocal) "Your library is empty" else "No books found")
             }
             else -> {
-                // Use grid for tablet or landscape, list for portrait phone
                 val isGrid = isTablet || isLandscape
                 BookList(
                     books = booksToShow,
@@ -132,6 +197,33 @@ fun LibraryApp(viewModel: AppViewModel) {
         }
     }
 }
+@Composable
+fun DropdownSelector(
+    label: String,
+    options: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        OutlinedButton(onClick = { expanded = true }) {
+            Text("$label: $selected")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
 
 
 
@@ -291,7 +383,19 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
                     modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
                 )
             } else {
-                Box(modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp)))
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                        .background(Color(0xFF90A4AE), RoundedCornerShape(4.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = book.title.firstOrNull()?.uppercase() ?: "?",
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -319,6 +423,33 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
 
     if (showEditDialog) {
         EditBookDialog(book = book, viewModel = viewModel) { showEditDialog = false }
+    }
+
+    @Composable
+    fun DropdownSelector(
+        label: String,
+        options: List<String>,
+        selected: String,
+        onSelect: (String) -> Unit
+    ) {
+        var expanded by remember { mutableStateOf(false) }
+
+        Box {
+            OutlinedButton(onClick = { expanded = true }) {
+                Text("$label: $selected")
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option) },
+                        onClick = {
+                            onSelect(option)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 
