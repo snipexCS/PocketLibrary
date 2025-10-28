@@ -11,7 +11,7 @@ class FirestoreRepository {
     private val db = FirebaseFirestore.getInstance()
 
     init {
-        // Enable offline persistence
+
         db.firestoreSettings = FirebaseFirestoreSettings.Builder()
             .setPersistenceEnabled(true)
             .build()
@@ -21,7 +21,7 @@ class FirestoreRepository {
         val docRef = db.collection("users")
             .document(userId)
             .collection("favourites")
-            .document(book.id.toString()) // Use local Room ID
+            .document(book.id.toString())
         docRef.set(book).await()
     }
 

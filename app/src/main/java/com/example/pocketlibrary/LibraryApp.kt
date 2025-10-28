@@ -1,6 +1,7 @@
 package com.example.pocketlibrary
 
 import android.Manifest
+
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -17,8 +18,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,8 +39,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.saveable.rememberSaveable
 
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
+
+
 
 
 @Composable
@@ -57,50 +56,31 @@ fun LibraryApp(viewModel: AppViewModel) {
 
     val searchResults by viewModel.searchResults.collectAsState(initial = emptyList())
     val myLibrary by viewModel.myLibrary.collectAsState(initial = emptyList())
-    val isLoading by viewModel.isLoading.collectAsState()
-    val error by viewModel.error.collectAsState()
 
-    // 🔹 Observe filter and sort states from ViewModel
-    val currentFilter by viewModel.currentFilter.collectAsState()
-    val currentSort by viewModel.currentSort.collectAsState()
+    var currentFilter by rememberSaveable { mutableStateOf("title") }
+    var currentSort by rememberSaveable { mutableStateOf<String?>(null) }
+
 
     val booksToShow = if (showLocal) myLibrary else searchResults
 
-    Column(modifier = Modifier
-        .fillMaxSize()
-        .padding(8.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
 
-        // 🔹 Search Field
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { query ->
                 searchQuery = query
                 if (showLocal) {
-                    // 🔹 Call local search immediately on text change
-                    viewModel.searchLocal(
-                        query,
-                        currentFilter,
-                        currentSort
-                    )
+                    viewModel.searchLocal(query, currentFilter, currentSort)
                 } else {
-                    // 🔹 Optional: live online search (may want debounce to avoid too many requests)
                     viewModel.searchOnline(query)
                 }
             },
             label = { Text("Search by title or author") },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = {
-                    if (!showLocal) viewModel.searchOnline(searchQuery)
-                }
-            )
+            modifier = Modifier.fillMaxWidth()
         )
-
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 🔹 Top Action Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -118,7 +98,6 @@ fun LibraryApp(viewModel: AppViewModel) {
             Button(onClick = { showManualEntry = true }) { Text("Add Book") }
         }
 
-        // 🔹 Filter + Sort Controls (only for local view)
         if (showLocal) {
             Spacer(modifier = Modifier.height(10.dp))
             Row(
@@ -127,76 +106,49 @@ fun LibraryApp(viewModel: AppViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 DropdownSelector(
-                    label = "Filter by",
-                    options = listOf("Title", "Author"),
-                    selected = currentFilter.name.lowercase().replaceFirstChar { it.uppercase() }
-                ) { selected ->
-                    val filter = if (selected == "Author") FilterType.AUTHOR else FilterType.TITLE
-                    viewModel.searchLocal(searchQuery, filter, currentSort)
-                }
-
-                DropdownSelector(
                     label = "Sort by",
-                    options = listOf(
-                        "None", "Title (A–Z)", "Title (Z–A)",
-                        "Author (A–Z)", "Author (Z–A)",
-                        "Year (Oldest)", "Year (Newest)"
-                    ),
+                    options = listOf("None", "Title (A–Z)", "Author (A–Z)", "Year (Oldest)"),
                     selected = when (currentSort) {
-                        SortOption.TITLE_ASC -> "Title (A–Z)"
-                        SortOption.TITLE_DESC -> "Title (Z–A)"
-                        SortOption.AUTHOR_ASC -> "Author (A–Z)"
-                        SortOption.AUTHOR_DESC -> "Author (Z–A)"
-                        SortOption.YEAR_ASC -> "Year (Oldest)"
-                        SortOption.YEAR_DESC -> "Year (Newest)"
-                        SortOption.NONE -> "None"
+                        "title_asc" -> "Title (A–Z)"
+                        "author_asc" -> "Author (A–Z)"
+                        "year_asc" -> "Year (Oldest)"
+                        else -> "None"
                     }
                 ) { selected ->
-                    val sort = when (selected) {
-                        "Title (A–Z)" -> SortOption.TITLE_ASC
-                        "Title (Z–A)" -> SortOption.TITLE_DESC
-                        "Author (A–Z)" -> SortOption.AUTHOR_ASC
-                        "Author (Z–A)" -> SortOption.AUTHOR_DESC
-                        "Year (Oldest)" -> SortOption.YEAR_ASC
-                        "Year (Newest)" -> SortOption.YEAR_DESC
-                        else -> SortOption.NONE
+                    currentSort= when (selected) {
+                        "Title (A–Z)" -> "title_asc"
+                        "Author (A–Z)" -> "author_asc"
+                        "Year (Oldest)" -> "year_asc"
+                        else -> null
                     }
-                    viewModel.searchLocal(searchQuery, currentFilter, sort)
+                    viewModel.searchLocal(searchQuery, currentFilter, currentSort)
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 🔹 Manual Entry Dialog
         if (showManualEntry) {
             ManualEntryDialog(viewModel) { showManualEntry = false }
         }
 
-        // 🔹 Loading / Error / Book List
-        when {
-            isLoading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            error != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = error ?: "Unknown error", color = MaterialTheme.colorScheme.error)
-            }
-            booksToShow.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (booksToShow.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(if (showLocal) "Your library is empty" else "No books found")
             }
-            else -> {
-                val isGrid = isTablet || isLandscape
-                BookList(
-                    books = booksToShow,
-                    viewModel = viewModel,
-                    showAddButton = !showLocal,
-                    modifier = Modifier.fillMaxSize(),
-                    isGrid = isGrid
-                )
-            }
+        } else {
+            val isGrid = isTablet || isLandscape
+            BookList(
+                books = booksToShow,
+                viewModel = viewModel,
+                showAddButton = !showLocal,
+                modifier = Modifier.fillMaxSize(),
+                isGrid = isGrid
+            )
         }
     }
 }
+
 @Composable
 fun DropdownSelector(
     label: String,
@@ -239,7 +191,7 @@ fun BookList(
         val configuration = LocalConfiguration.current
         val screenWidthDp = configuration.screenWidthDp
 
-        // Determine number of columns: Tablet 2+, Phone landscape 1
+
         val columns = if (screenWidthDp >= 600) 2 else 1
         val spacing = if (columns > 1) 12.dp else 4.dp
 
@@ -253,7 +205,7 @@ fun BookList(
             horizontalArrangement = Arrangement.spacedBy(spacing),
             verticalArrangement = Arrangement.spacedBy(spacing)
         ) {
-            items(books, key = { it.id.takeIf { it != 0 } ?: "${it.title}-${it.author}-${it.year}".hashCode() }) { book ->
+            items(books, key = { it.id.takeIf { it != 0 } ?: "${it.title}-${it.author}-${it.year}" }) { book ->
                 BookItem(book, viewModel, showAddButton)
             }
         }
@@ -265,7 +217,7 @@ fun BookList(
             contentPadding = PaddingValues(4.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            items(books, key = { it.id.takeIf { it != 0 } ?: "${it.title}-${it.author}-${it.year}".hashCode() }) { book ->
+            items(books, key = { it.id.takeIf { it != 0 } ?: "${it.title}-${it.author}-${it.year}"}) { book ->
                 BookItem(book, viewModel, showAddButton)
             }
         }
@@ -352,7 +304,6 @@ fun ManualEntryDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
 
 @Composable
 fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
-    val context = LocalContext.current
     var showEditDialog by remember { mutableStateOf(false) }
 
     Card(
@@ -365,7 +316,7 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
     ) {
         Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
 
-            // Image
+
             val bitmap = remember(book.personalPhotoPath, book.coverUrl) {
                 book.personalPhotoPath?.let { BitmapFactory.decodeFile(it) }
             }
@@ -400,14 +351,14 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Details
+
             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                 Text(text = book.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
                 Text(text = "by ${book.author}", style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                 Text(text = "Published: ${book.year ?: "Unknown"}", style = MaterialTheme.typography.bodySmall)
             }
 
-            // Buttons
+
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (showAddButton) {
                     Button(onClick = { viewModel.addToLibrary(book) }) { Text("Add") }
@@ -425,32 +376,7 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
         EditBookDialog(book = book, viewModel = viewModel) { showEditDialog = false }
     }
 
-    @Composable
-    fun DropdownSelector(
-        label: String,
-        options: List<String>,
-        selected: String,
-        onSelect: (String) -> Unit
-    ) {
-        var expanded by remember { mutableStateOf(false) }
 
-        Box {
-            OutlinedButton(onClick = { expanded = true }) {
-                Text("$label: $selected")
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option) },
-                        onClick = {
-                            onSelect(option)
-                            expanded = false
-                        }
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -470,7 +396,7 @@ fun ShareBookButton(book: Book) {
                     "Check out this book!\nTitle: ${book.title}\nAuthor: ${book.author}\nPublished: ${book.year ?: "Unknown"}"
                 )
 
-                // Include image if available
+
                 book.personalPhotoPath?.let {
                     val imageUri = FileProvider.getUriForFile(
                         context,
@@ -563,9 +489,7 @@ fun EditBookDialog(book: Book, viewModel: AppViewModel, onDismiss: () -> Unit) {
     )
 }
 
-/**
- * Safe function to get display name and phone number from a contact Uri.
- */
+
 private fun loadNameAndNumber(
     resolver: android.content.ContentResolver,
     contactUri: Uri
