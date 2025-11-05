@@ -1,6 +1,7 @@
 package com.example.pocketlibrary
 
 import android.Manifest
+import android.R.color.black
 
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -63,10 +64,11 @@ fun LibraryApp(viewModel: AppViewModel) {
 
     val booksToShow = if (showLocal) myLibrary else searchResults
 
-    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(8.dp),) {
 
         OutlinedTextField(
             value = searchQuery,
+
             onValueChange = { query ->
                 searchQuery = query
                 if (showLocal) {
@@ -75,8 +77,12 @@ fun LibraryApp(viewModel: AppViewModel) {
                     viewModel.searchOnline(query)
                 }
             },
-            label = { Text("Search by title or author") },
+            label = { Text("Search ") } ,
+
             modifier = Modifier.fillMaxWidth()
+
+
+
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -84,8 +90,10 @@ fun LibraryApp(viewModel: AppViewModel) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
+
         ) {
             Button(onClick = {
+
                 showLocal = false
                 viewModel.searchOnline(searchQuery)
             }) { Text("Search Online") }
@@ -310,54 +318,33 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
-            .border(1.dp, Color.Gray, RoundedCornerShape(8.dp)),
+            .border(1.dp, color = Color.Black, RoundedCornerShape(8.dp)),
         shape = RoundedCornerShape(8.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-
 
             val bitmap = remember(book.personalPhotoPath, book.coverUrl) {
                 book.personalPhotoPath?.let { BitmapFactory.decodeFile(it) }
             }
 
             if (bitmap != null) {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "Book Photo",
-                    modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                )
+                Image(bitmap = bitmap.asImageBitmap(), contentDescription = "Book Photo", modifier = Modifier.size(80.dp).border(1.dp, color = Color.Magenta, RoundedCornerShape(4.dp)))
             } else if (book.coverUrl != null) {
-                AsyncImage(
-                    model = book.coverUrl,
-                    contentDescription = "Book Cover",
-                    modifier = Modifier.size(80.dp).border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                )
+                AsyncImage(model = book.coverUrl, contentDescription = "Book Cover", modifier = Modifier.size(80.dp).border(1.dp, color = Color.Magenta, RoundedCornerShape(4.dp)))
             } else {
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
-                        .background(Color(0xFF90A4AE), RoundedCornerShape(4.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = book.title.firstOrNull()?.uppercase() ?: "?",
-                        color = Color.White,
-                        style = MaterialTheme.typography.headlineMedium
-                    )
+                Box(modifier = Modifier.size(80.dp).border(1.dp,color = Color.Magenta, RoundedCornerShape(4.dp)).background(color = Color.Magenta, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+                    Text(text = book.title.firstOrNull()?.uppercase() ?: "?", color = Color.Magenta, style = MaterialTheme.typography.headlineMedium)
                 }
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
-
+            Spacer(Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                Text(text = book.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
-                Text(text = "by ${book.author}", style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                Text(text = "Published: ${book.year ?: "Unknown"}", style = MaterialTheme.typography.bodySmall)
+                Text(book.title,  maxLines = 2)
+                Text("by ${book.author}",style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                Text("Published: ${book.year ?: "Unknown"}")
             }
-
 
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (showAddButton) {
@@ -372,11 +359,7 @@ fun BookItem(book: Book, viewModel: AppViewModel, showAddButton: Boolean) {
         }
     }
 
-    if (showEditDialog) {
-        EditBookDialog(book = book, viewModel = viewModel) { showEditDialog = false }
-    }
-
-
+    if (showEditDialog) EditBookDialog(book, viewModel) { showEditDialog = false }
 }
 
 @Composable
@@ -443,13 +426,8 @@ fun EditBookDialog(book: Book, viewModel: AppViewModel, onDismiss: () -> Unit) {
     var capturedPhoto by remember { mutableStateOf<Bitmap?>(null) }
     var photoUri by remember { mutableStateOf(book.personalPhotoPath?.let { Uri.parse(it) }) }
 
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        bitmap?.let {
-            capturedPhoto = it
-            photoUri = viewModel.saveBitmapToInternalStorage(viewModel.context, it)
-        }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        bitmap?.let { capturedPhoto = it; photoUri = viewModel.saveBitmapToInternalStorage(viewModel.context, it) }
     }
 
     AlertDialog(
@@ -457,35 +435,16 @@ fun EditBookDialog(book: Book, viewModel: AppViewModel, onDismiss: () -> Unit) {
         title = { Text("Edit Book") },
         text = {
             Column {
-                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") })
-                OutlinedTextField(value = author, onValueChange = { author = it }, label = { Text("Author") })
-                OutlinedTextField(value = year, onValueChange = { year = it }, label = { Text("Year") })
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                capturedPhoto?.let { bitmap ->
-                    Image(bitmap = bitmap.asImageBitmap(), contentDescription = "Book Photo", modifier = Modifier.height(150.dp))
-                }
-
-                Button(onClick = { cameraLauncher.launch(null) }, modifier = Modifier.padding(top = 8.dp)) {
-                    Text("Capture Photo")
-                }
+                OutlinedTextField(title, { title = it }, label = { Text("Title") })
+                OutlinedTextField(author, { author = it }, label = { Text("Author") })
+                OutlinedTextField(year, { year = it }, label = { Text("Year") })
+                Spacer(Modifier.height(8.dp))
+                capturedPhoto?.let { Image(it.asImageBitmap(), "Book Photo", Modifier.height(150.dp)) }
+                Button({ cameraLauncher.launch(null) }, Modifier.padding(top = 8.dp)) { Text("Capture Photo") }
             }
         },
-        confirmButton = {
-            Button(onClick = {
-                val yearInt = year.toIntOrNull()
-                val updatedBook = book.copy(
-                    title = title,
-                    author = author,
-                    year = yearInt,
-                    personalPhotoPath = photoUri?.path
-                )
-                viewModel.updateBook(updatedBook)
-                onDismiss()
-            }) { Text("Save") }
-        },
-        dismissButton = { Button(onClick = onDismiss) { Text("Cancel") } }
+        confirmButton = { Button({ viewModel.updateBook(book.copy(title = title, author = author, year = year.toIntOrNull(), personalPhotoPath = photoUri?.path)); onDismiss() }) { Text("Save") } },
+        dismissButton = { Button(onDismiss) { Text("Cancel") } }
     )
 }
 
